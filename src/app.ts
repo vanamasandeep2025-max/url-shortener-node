@@ -1,3 +1,4 @@
+import path from "node:path";
 import express, { Express } from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -19,6 +20,9 @@ export function createApp(): Express {
 
   app.use("/health", healthRouter);
   app.use("/api/urls", urlsRouter);
+  // Manual test UI only -- talks to the API above over fetch(). Mounted under /ui
+  // (not "/") so it can never collide with the redirect catch-all route below.
+  app.use("/ui", express.static(path.join(__dirname, "../public")));
   app.use("/", redirectRouter);
 
   app.use(notFoundHandler);
