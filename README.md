@@ -1,0 +1,137 @@
+# URL Shortener (Node/TypeScript)
+
+A URL shortener prototype: Express + TypeScript REST API, PostgreSQL storage
+(via Prisma), Redis-backed redirect caching and rate limiting (both designed
+to fail open if Redis is unavailable), click analytics, and Docker artifacts
+for deployment.
+
+> **Note on validation in this environment**: this machine had no working
+> Docker/WSL2, so `docker compose up --build` has **not** been executed here
+> — the Dockerfile/docker-compose.yml represent the intended deployment path
+> but are untested in this session. Everything else *was* actually run: the
+> full test suite (48/48 passing) against a real, natively-installed
+> PostgreSQL, plus a live server run driven with real `curl` requests through
+> every endpoint. See [docs/architecture.md](docs/architecture.md#known-limitations-of-this-environment)
+> and [docs/ai-usage-log.md](docs/ai-usage-log.md) for exactly what was and
+> wasn't verified, including two real bugs this live validation found and fixed.
+
+## Features
+
+- Create a short URL from any `http(s)` long URL, with an optional custom
+  alias and an optional expiry.
+- Redirect short → long URL (`302`), with Redis cache-aside on the hot path
+  and a fast fail-open to Postgres if Redis is down.
+- Click analytics: total clicks + paginated recent click events (timestamp,
+  referrer, user-agent).
+- Reliability: collision-checked code generation, Redis-backed rate limiting
+  (with an in-memory fallback if Redis is unavailable), soft delete, health
+  endpoint, graceful shutdown.
+- Consistent JSON error responses with correct HTTP status codes.
+
+## Project layout
+
+```
+src/          Express app: routes/ → middleware/ → services/, lib/ (Prisma, Redis, env, logger)
+prisma/       Schema + hand-written initial migration
+tests/        unit/ (mocked deps) and integration/ (real Postgres, mocked Redis)
+docs/         Architecture, DB schema, API docs, task breakdown, AI usage log, scenarios, engineering summary
+docker-compose.yml, Dockerfile   Intended deployment path (see note above)
+```
+
+## Prerequisites
+
+- **Docker path** (untested in this session, but intended to work):
+  Docker + Docker Compose.
+- **Local dev path** (what was actually used and verified here): Node.js 20+,
+  a running PostgreSQL 16 instance, and optionally Redis 7 (the app runs
+  correctly, in a degraded/no-cache mode, without Redis).
+
+## Run with Docker Compose
+
+```bash
+docker compose up --build
+```
+- API: http://localhost:3000
+
+This starts Postgres, Redis, and the API together; the API container runs
+`prisma migrate deploy` on startup.
+
+## Run locally (verified path)
+
+1. Start PostgreSQL and create a database/role matching `.env.example`
+   (defaults: db `urlshortener`, user/password `urlshortener`), e.g.:
+   ```sql
+   CREATE ROLE urlshortener LOGIN PASSWORD 'urlshortener';
+   CREATE DATABASE urlshortener OWNER urlshortener;
+   CREATE DATABASE urlshortener_test OWNER urlshortener; -- for integration tests
+   ```
+2. Copy the env file and adjust if needed:
+   ```bash
+   cp .env.example .env
+   ```
+3. Install dependencies and generate the Prisma client:
+   ```bash
+   npm install
+   npx prisma generate
+   npx prisma migrate deploy
+   ```
+4. Build and run:
+   ```bash
+   npm run build
+   npm start
+   ```
+   Or for development with auto-reload: `npm run dev`.
+
+Redis is optional for local dev — if `REDIS_URL` points to nothing running,
+the app logs a connection warning and continues serving correctly (cache
+misses fall through to Postgres; rate limiting falls back to an in-memory
+limiter). See [docs/architecture.md](docs/architecture.md) for why this is a
+deliberate design, not an accident.
+
+## Running tests
+
+```bash
+npm run test:unit         # 34 tests, fully mocked, no infra needed
+npm run test:integration  # 13 tests, needs a running Postgres pointed at by DATABASE_URL
+npm test                  # both
+```
+
+Integration tests use `ioredis-mock` in place of a real Redis client (see
+[docs/engineering-summary.md](docs/engineering-summary.md) for why), and
+truncate the `short_urls`/`click_events` tables between tests.
+
+## API quick reference
+
+```bash
+# Create a short URL
+curl -X POST http://localhost:3000/api/urls \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/a/very/long/path"}'
+
+# Follow it
+curl -i http://localhost:3000/<code>
+
+# Check analytics
+curl http://localhost:3000/api/urls/<code>/stats
+
+# Health check
+curl http://localhost:3000/health
+```
+
+Full endpoint reference: [docs/api-documentation.md](docs/api-documentation.md).
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — components, request flows, key
+  decisions, known limitations of this environment.
+- [Database schema](docs/database-schema.md) — ER diagram and column
+  reference.
+- [API documentation](docs/api-documentation.md) — full endpoint reference.
+- [Task breakdown](docs/task-breakdown.md) — how the work was decomposed and
+  sequenced, including two environment-driven detours.
+- [AI usage log](docs/ai-usage-log.md) — what was AI-generated, what the
+  engineer decided, and three real bugs found by live validation (with fixes).
+- [Scenarios](docs/scenarios.md) — greenfield / brownfield (a real bug fix,
+  with before/after diff) / ambiguous-requirement worked examples.
+- [Engineering summary](docs/engineering-summary.md) — assumptions, risks,
+  trade-offs, validation approach, limitations, lessons learned.
