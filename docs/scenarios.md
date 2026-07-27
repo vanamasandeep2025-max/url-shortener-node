@@ -21,7 +21,7 @@ direct questions before implementation). See
 [ai-usage-log.md](ai-usage-log.md) for exactly what was generated vs.
 engineer-directed.
 
-**Validation**: 34 unit tests (mocked dependencies) + 13 integration tests
+**Validation**: 34 unit tests (mocked dependencies) + 15 integration tests
 (real local Postgres, `ioredis-mock` for Redis) + a live server run driven
 with real `curl`/`Invoke-RestMethod` requests through every endpoint. This
 combination — not the test suite alone — is what surfaced the three defects

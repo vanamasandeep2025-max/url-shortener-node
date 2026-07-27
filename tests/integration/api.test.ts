@@ -126,6 +126,17 @@ describe("GET /api/urls", () => {
     expect(res.body.items).toHaveLength(1);
     expect(res.body.total).toBe(2);
   });
+
+  it("excludes soft-deleted links when includeInactive=false (the default)", async () => {
+    const create = await request(app).post("/api/urls").send({ url: "https://example.com/to-delete" });
+    await request(app).delete(`/api/urls/${create.body.code}`);
+
+    const withoutInactive = await request(app).get("/api/urls?includeInactive=false");
+    expect(withoutInactive.body.items.find((i: { code: string }) => i.code === create.body.code)).toBeUndefined();
+
+    const withInactive = await request(app).get("/api/urls?includeInactive=true");
+    expect(withInactive.body.items.find((i: { code: string }) => i.code === create.body.code)).toBeDefined();
+  });
 });
 
 describe("DELETE /api/urls/:code", () => {

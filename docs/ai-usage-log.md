@@ -34,7 +34,7 @@ actually running the code.
 All application code (`src/`), tests (`tests/`), config, and this
 documentation set were AI-generated in an initial pass based on the plan
 above. The engineer's review gate was **running it for real**, not
-line-by-line code reading — and that gate caught three genuine defects the
+line-by-line code reading — and that gate caught four genuine defects the
 AI's own first pass had introduced and its own written tests had not caught:
 
 | # | Defect | How it was found | Fix |
@@ -42,10 +42,11 @@ AI's own first pass had introduced and its own written tests had not caught:
 | 1 | `POST /api/urls` always returned `400`. The Zod schema's field is `url`, but the route passed `req.body` straight through to `createShortUrl`, which expects `longUrl`. | A live `curl` request during end-to-end validation (unit tests mocked the service layer directly, so they never exercised this route-to-service mapping). | Route now explicitly maps `body.url → longUrl` ([src/routes/urls.ts](../src/routes/urls.ts)). |
 | 2 | Redirect requests took 20s+ to fail over to Postgres when Redis was unreachable — the opposite of the intended fail-open design. | Timed a live redirect request against a real (down) Redis; the delay was long enough that a naive `curl` even appeared to hang. | `enableOfflineQueue: false` + tighter `maxRetriesPerRequest`/`retryStrategy` on the ioredis client ([src/lib/redis.ts](../src/lib/redis.ts)) — Redis commands now reject in milliseconds instead of queuing through reconnect backoff. Verified: redirect now resolves in ~39ms with Redis down. This is written up in full as the brownfield scenario in [scenarios.md](scenarios.md). |
 | 3 | Malformed request JSON produced a `500` instead of a `400`. `express.json()`/body-parser attaches `status`/`statusCode` to its `SyntaxError`, but the error handler only special-cased the app's own `AppError` hierarchy, so this fell through to the generic 500 branch and was logged as an "unhandled error". | Found while investigating an unrelated PowerShell/curl quoting bug in a manual test — the malformed-JSON path the quoting bug accidentally exercised returned the wrong status. | `errorHandler` now recognizes any `Error` with a numeric `status`/`statusCode` in the 4xx range and returns that status instead of falling through to 500 ([src/middleware/errorHandler.ts](../src/middleware/errorHandler.ts)). Added a regression test for it. |
+| 4 | `GET /api/urls?includeInactive=false` still returned soft-deleted links — the literal string `"false"` was being coerced to `true`. | Noticed the risk while building the manual test UI (which calls this endpoint), then confirmed it live: created a link, soft-deleted it, and queried with `includeInactive=false`, which incorrectly returned it. | `z.coerce.boolean()` runs `Boolean(str)`, and `Boolean("false")` is `true` — a well-known Zod footgun. Replaced with an explicit `z.enum(["true","false"]).transform(v => v === "true")` ([src/routes/urls.ts](../src/routes/urls.ts)). Added a regression test. |
 
-Each fix was re-verified by rerunning the full test suite (`npx jest`, 48/48
-passing after all three fixes) and repeating the live `curl` walkthrough —
-not accepted on the strength of the diff alone.
+Each fix was re-verified by rerunning the full test suite (`npx jest`, 49/49
+passing after all four fixes) and repeating the live `curl`/browser
+walkthrough — not accepted on the strength of the diff alone.
 
 ## Design choices proposed by AI and accepted as-is
 
@@ -66,9 +67,14 @@ not accepted on the strength of the diff alone.
   Express route param couldn't be inferred; fixed with an explicit generic).
 - `npx eslint` — caught and fixed a `no-require-imports` violation in a test
   file (rewritten to use static imports with `jest.mock` hoisting).
-- `npx jest` (unit + integration) — 48/48 passing as of the final commit.
+- `npx jest` (unit + integration) — 49/49 passing as of the final commit.
 - Live server run + manual `curl`/`Invoke-RestMethod` walkthrough of every
   endpoint, including the rate limiter and a genuinely-unreachable Redis.
+- A minimal manual test UI (`public/`, served at `/ui`) was built on request
+  so the API could be exercised from a real browser rather than only via
+  curl. The engineer used it directly (create → redirect → stats worked
+  first try); building it is also what prompted the review that found defect
+  #4 above, since the UI calls `includeInactive` as a literal query string.
 
 ## Limitations of this traceability record
 

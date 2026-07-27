@@ -17,8 +17,17 @@ const paginationSchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+// z.coerce.boolean() would coerce via `Boolean(str)`, so the literal string "false"
+// (like any non-empty string) becomes `true` -- a well-known Zod footgun. Parse the
+// two literal query values explicitly instead.
+const booleanQueryParam = z
+  .enum(["true", "false"])
+  .optional()
+  .transform((v) => v === "true")
+  .default("false");
+
 const listQuerySchema = paginationSchema.extend({
-  includeInactive: z.coerce.boolean().default(false),
+  includeInactive: booleanQueryParam,
 });
 
 urlsRouter.post("/", createUrlRateLimiter, validateBody(createUrlSchema), async (req, res, next) => {

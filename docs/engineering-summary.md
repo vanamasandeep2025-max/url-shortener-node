@@ -96,15 +96,20 @@ fail open), click analytics, and Docker artifacts for deployment. See
 - **Unit**: 34 tests, Jest, fully mocked Prisma/Redis — covers code
   generation/collision retry, URL validation, and every branch of the service
   layer (happy path, expiry, soft delete, cache hit/miss, Redis failure).
-- **Integration**: 13 tests, Supertest against the real Express app, a real
+- **Integration**: 15 tests, Supertest against the real Express app, a real
   local PostgreSQL database, and `ioredis-mock` — exercises every endpoint's
   success and error paths (400/404/409/410) through an actual database, with
   data reset between tests.
 - **Live**: the compiled server, run for real and driven with `curl`/
   `Invoke-RestMethod` through every endpoint, the rate limiter, and the
   redirect path with Redis genuinely unreachable. This step — not the
-  automated suite — is what found the three bugs logged in
+  automated suite — is what found the three API-level bugs logged in
   [ai-usage-log.md](ai-usage-log.md).
+- **Browser**: a minimal manual test UI (`public/`, served at `/ui`) was
+  added on request so the API could be driven from a real browser instead of
+  only curl. Used directly in a real browser session (create → redirect →
+  stats all confirmed working); building it also prompted the review that
+  caught the fourth bug (`includeInactive=false` being coerced to `true`).
 - **Not done, and stated plainly rather than implied**: `docker compose up
   --build` was never executed (see [architecture.md](architecture.md)'s
   Known Limitations); Redis's actual behavior under real network conditions

@@ -88,6 +88,15 @@ misses fall through to Postgres; rate limiting falls back to an in-memory
 limiter). See [docs/architecture.md](docs/architecture.md) for why this is a
 deliberate design, not an accident.
 
+## Manual test UI
+
+Once the server is running, open **http://localhost:3000/ui/** for a minimal
+browser page to shorten URLs, follow the short link, view click stats, and
+soft-delete links — a quick way to exercise the API without hand-writing
+curl commands. It's a thin client over the same `/api/urls` endpoints
+documented below (see `public/index.html` and `public/app.js`); it is not
+part of the production API surface.
+
 ## Running tests
 
 ```bash
