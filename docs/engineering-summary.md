@@ -75,6 +75,14 @@ fail open), click analytics, and Docker artifacts for deployment. See
 - Client IPs are hashed (SHA-256, truncated) before storage, not stored raw.
 - No secrets are hardcoded; DB/Redis credentials come from environment
   variables (`.env`, not committed — see `.gitignore`).
+- **Stored data is not HTML-safe by construction.** `longUrl` is validated as
+  a well-formed `http(s)` URL but not sanitized against HTML-breaking
+  characters, and click `referrer`/`user-agent` are raw request headers with
+  no validation at all. The manual test UI (`public/app.js`) escapes all of
+  these before rendering — encode-on-output, since the API must keep the
+  exact stored URL for correct redirects. Any future UI/consumer of this data
+  (including a real admin dashboard) must do the same; this is not enforced
+  by the API itself.
 - Not addressed, and explicitly out of scope for this prototype rather than
   an oversight: authentication, authorization, audit logging, a redirect
   denylist.
