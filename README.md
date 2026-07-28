@@ -9,11 +9,13 @@ for deployment.
 > Docker/WSL2, so `docker compose up --build` has **not** been executed here
 > — the Dockerfile/docker-compose.yml represent the intended deployment path
 > but are untested in this session. Everything else *was* actually run: the
-> full test suite (48/48 passing) against a real, natively-installed
-> PostgreSQL, plus a live server run driven with real `curl` requests through
+> full backend test suite (49/49 passing) against a real, natively-installed
+> PostgreSQL, a 16-test Playwright suite driving a real browser against the
+> dashboard, plus a live server run driven with real `curl` requests through
 > every endpoint. See [docs/architecture.md](docs/architecture.md#known-limitations-of-this-environment)
 > and [docs/ai-usage-log.md](docs/ai-usage-log.md) for exactly what was and
-> wasn't verified, including two real bugs this live validation found and fixed.
+> wasn't verified, including five real bugs this validation found and fixed
+> (three API-level, one Zod query-param footgun, and one stored-XSS finding).
 
 ## Features
 
@@ -101,13 +103,34 @@ part of the production API surface.
 
 ```bash
 npm run test:unit         # 34 tests, fully mocked, no infra needed
-npm run test:integration  # 13 tests, needs a running Postgres pointed at by DATABASE_URL
-npm test                  # both
+npm run test:integration  # 15 tests, needs a running Postgres pointed at by DATABASE_URL
+npm test                  # both (49 tests)
+npm run test:e2e          # 16 Playwright tests, drives a real browser against the real app
 ```
 
 Integration tests use `ioredis-mock` in place of a real Redis client (see
 [docs/engineering-summary.md](docs/engineering-summary.md) for why), and
 truncate the `short_urls`/`click_events` tables between tests.
+
+### End-to-end (Playwright)
+
+`npm run test:e2e` builds the project, spins up two real server instances
+(handled automatically by Playwright's `webServer` config — no manual setup),
+and drives an actual Chromium browser against the dashboard at `/ui`. It needs
+`urlshortener_test` migrated (same prerequisite as `test:integration`) and
+`npx playwright install chromium` run once beforehand.
+
+Covers: creating links (random code, custom alias, expiry), client- and
+server-side validation errors, alias conflicts, the empty state, delete +
+"Show deleted" toggle (including a regression guard for the
+`includeInactive` coercion bug), click tracking end-to-end through the
+redirect into the Details view, copy-to-clipboard, a stored-XSS regression
+test (malicious `longUrl` and malicious `referrer`/`user-agent`), and rate
+limiting — the last one runs against its own isolated server instance
+(`RATE_LIMIT_POINTS=3`) so it can't starve, or be starved by, any other test's
+quota. See [docs/scenarios.md](docs/scenarios.md) and
+[docs/ai-usage-log.md](docs/ai-usage-log.md) for how this suite was built and
+what it caught.
 
 ## API quick reference
 
@@ -139,7 +162,9 @@ Full endpoint reference: [docs/api-documentation.md](docs/api-documentation.md).
 - [Task breakdown](docs/task-breakdown.md) — how the work was decomposed and
   sequenced, including two environment-driven detours.
 - [AI usage log](docs/ai-usage-log.md) — what was AI-generated, what the
-  engineer decided, and three real bugs found by live validation (with fixes).
+  engineer decided, and five real bugs found by live/automated validation
+  (with fixes), plus two test-authoring mistakes the Playwright suite's first
+  run caught in itself.
 - [Scenarios](docs/scenarios.md) — greenfield / brownfield (a real bug fix,
   with before/after diff) / ambiguous-requirement worked examples.
 - [Engineering summary](docs/engineering-summary.md) — assumptions, risks,

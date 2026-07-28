@@ -113,11 +113,20 @@ fail open), click analytics, and Docker artifacts for deployment. See
   redirect path with Redis genuinely unreachable. This step — not the
   automated suite — is what found the three API-level bugs logged in
   [ai-usage-log.md](ai-usage-log.md).
-- **Browser**: a minimal manual test UI (`public/`, served at `/ui`) was
-  added on request so the API could be driven from a real browser instead of
-  only curl. Used directly in a real browser session (create → redirect →
+- **Browser (manual)**: a minimal manual test UI (`public/`, served at `/ui`)
+  was added on request so the API could be driven from a real browser instead
+  of only curl. Used directly in a real browser session (create → redirect →
   stats all confirmed working); building it also prompted the review that
   caught the fourth bug (`includeInactive=false` being coerced to `true`).
+- **Browser (automated)**: a 16-test Playwright suite (`tests/e2e/`) drives a
+  real Chromium browser against the dashboard — create flows, validation and
+  conflict errors, list/delete/toggle (with a regression test for bug #4),
+  click tracking through to the Details view, copy-to-clipboard, a
+  stored-XSS regression test for bug #5, and rate limiting (against its own
+  isolated server instance so it can't interfere with other tests' quota).
+  See [ai-usage-log.md](ai-usage-log.md) for two test-authoring mistakes this
+  suite's first run caught and fixed, and [scenarios.md](scenarios.md) for how
+  it was decomposed and executed.
 - **Not done, and stated plainly rather than implied**: `docker compose up
   --build` was never executed (see [architecture.md](architecture.md)'s
   Known Limitations); Redis's actual behavior under real network conditions

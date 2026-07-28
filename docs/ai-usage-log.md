@@ -78,6 +78,29 @@ of the diff alone.
   curl. The engineer used it directly (create → redirect → stats worked
   first try); building it is also what prompted the review that found defect
   #4 above, since the UI calls `includeInactive` as a literal query string.
+- **Playwright end-to-end suite** (`tests/e2e/`, `npm run test:e2e`), added on
+  request to cover the dashboard from a real browser: 16 tests across create
+  flows, validation/conflict errors, list/delete/toggle, click tracking
+  through to the Details view, copy-to-clipboard, the stored-XSS regression
+  (#5), and rate limiting. First run surfaced two problems in the
+  AI-generated *tests themselves* (not the app) — logged here because
+  "traceability" means showing what was wrong and corrected, not just what
+  ended up passing:
+  - A "malformed alias → server error" test assumed a server round-trip, but
+    the alias input's HTML `pattern` attribute (mirroring the server rule)
+    made the browser block submission before any request was sent. Fixed by
+    explicitly removing the attribute to exercise server-side validation, and
+    added a second test asserting the client-side block itself as its own
+    scenario, rather than deleting the coverage gap.
+  - The stored-XSS regression test asserted against the table cell's visible
+    (45-char-truncated) text, which cut the payload short and made a correct
+    fix look like a failure. Fixed by asserting against the `title` attribute,
+    which always holds the untruncated escaped value.
+  - The rate-limit test runs against its own isolated server instance
+    (`RATE_LIMIT_POINTS=3`, a separate port) specifically so it can't
+    interfere with, or be interfered by, every other test's quota usage on
+    the shared per-IP limiter — a design decision made before writing the
+    test, not a fix after the fact.
 
 ## Limitations of this traceability record
 
