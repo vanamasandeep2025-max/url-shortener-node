@@ -1,0 +1,71 @@
+import { defineConfig, devices } from "@playwright/test";
+
+// Same DB the Jest integration suite uses -- already migrated. Do not point
+// this at the dev DB (.env's `urlshortener`): that one carries demo data for
+// manual exploration and e2e runs would create/soft-delete rows in it.
+const DATABASE_URL = "postgresql://urlshortener:urlshortener@localhost:5432/urlshortener_test";
+
+// Ports deliberately different from 3000, which is where a developer may already
+// have `npm start` running for manual exploration via /ui -- these must never collide.
+const APP_PORT = 3100;
+const RATE_LIMIT_PORT = 3200;
+
+export default defineConfig({
+  testDir: "./tests/e2e",
+  fullyParallel: false,
+  workers: 1,
+  reporter: "list",
+  timeout: 30_000,
+  use: {
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+  },
+  projects: [
+    {
+      // Every spec except the dedicated rate-limit test, which needs its own
+      // low-quota server so it can't starve (or be starved by) anything else.
+      name: "app",
+      testMatch: /^(?!.*rate-limit).*\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${APP_PORT}` },
+    },
+    {
+      name: "rate-limit",
+      testMatch: /rate-limit\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${RATE_LIMIT_PORT}` },
+    },
+  ],
+  webServer: [
+    {
+      command: "node dist/server.js",
+      url: `http://localhost:${APP_PORT}/health`,
+      reuseExistingServer: false,
+      timeout: 20_000,
+      env: {
+        PORT: String(APP_PORT),
+        NODE_ENV: "test",
+        DATABASE_URL,
+        REDIS_URL: "redis://localhost:6379",
+        PUBLIC_BASE_URL: `http://localhost:${APP_PORT}`,
+        CORS_ALLOWED_ORIGINS: `http://localhost:${APP_PORT}`,
+        RATE_LIMIT_POINTS: "100",
+        RATE_LIMIT_WINDOW_SECONDS: "60",
+      },
+    },
+    {
+      command: "node dist/server.js",
+      url: `http://localhost:${RATE_LIMIT_PORT}/health`,
+      reuseExistingServer: false,
+      timeout: 20_000,
+      env: {
+        PORT: String(RATE_LIMIT_PORT),
+        NODE_ENV: "test",
+        DATABASE_URL,
+        REDIS_URL: "redis://localhost:6379",
+        PUBLIC_BASE_URL: `http://localhost:${RATE_LIMIT_PORT}`,
+        CORS_ALLOWED_ORIGINS: `http://localhost:${RATE_LIMIT_PORT}`,
+        RATE_LIMIT_POINTS: "3",
+        RATE_LIMIT_WINDOW_SECONDS: "60",
+      },
+    },
+  ],
+});
