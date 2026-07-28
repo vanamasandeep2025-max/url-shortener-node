@@ -127,10 +127,18 @@ fail open), click analytics, and Docker artifacts for deployment. See
   See [ai-usage-log.md](ai-usage-log.md) for two test-authoring mistakes this
   suite's first run caught and fixed, and [scenarios.md](scenarios.md) for how
   it was decomposed and executed.
+- **Live Redis**: a real Redis 8.8 instance (portable Windows build, since
+  Docker/Memurai were both unavailable — see [architecture.md](architecture.md))
+  was brought up and both use cases re-verified directly against it: the
+  cache-aside redirect entry and the rate limiter's atomic counter were both
+  inspected live via `redis-cli`, confirming the fail-open design (and its
+  fix — see [scenarios.md](scenarios.md)) holds against genuine Redis
+  behavior, not just a mock or its absence.
 - **Not done, and stated plainly rather than implied**: `docker compose up
   --build` was never executed (see [architecture.md](architecture.md)'s
-  Known Limitations); Redis's actual behavior under real network conditions
-  (not a mock) was never observed; there is no load/soak test.
+  Known Limitations); there is no load/soak test; the live Redis instance
+  used above isn't managed as a persistent service, so it needs to be
+  started manually each session (see [README.md](../README.md)).
 
 ## Lessons learned
 

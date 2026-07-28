@@ -89,9 +89,19 @@ Practical effect:
   Java attempt at this brief flagged for its entire codebase.
 - **Integration tests run against a real, natively-installed PostgreSQL**
   (not Testcontainers, which needs Docker) — this part *is* observed-passing.
-- **Redis was not available at all** (no Docker, and Redis has no first-class
-  Windows build). Its client code was validated in three ways instead: unit
-  tests with a mocked client, integration tests via `ioredis-mock`, and a live
-  run of the actual compiled server against a real-but-unreachable Redis URL —
-  which is what surfaced the fail-open latency bug documented in
-  [scenarios.md](scenarios.md).
+- **Redis was initially unavailable** (no Docker, and Redis has no official
+  Windows build). Its client code was first validated three ways instead:
+  unit tests with a mocked client, integration tests via `ioredis-mock`, and
+  a live run of the compiled server against a real-but-unreachable Redis
+  URL — which is what surfaced the fail-open latency bug documented in
+  [scenarios.md](scenarios.md). **A genuine Redis instance was later brought
+  up** via a portable community Windows build (`taizod1024/redis-windows`,
+  real upstream Redis 8.8 compiled for Windows/MSYS2 — Memurai, the more
+  common commercial alternative, failed to install in this environment due
+  to an unrelated MSI installer defect). With real Redis running, both use
+  cases were re-verified directly against it: the redirect cache-aside entry
+  (`shortUrl:<code>`, correct TTL) and the rate limiter's atomic counter
+  (`rl:create:<ip>`) were both inspected live via `redis-cli`, not inferred.
+  The already-running server picked up the connection automatically via
+  ioredis's built-in reconnect logic, with no restart needed — itself a
+  small proof that the fail-open/reconnect design works as intended.

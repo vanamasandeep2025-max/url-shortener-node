@@ -90,6 +90,18 @@ misses fall through to Postgres; rate limiting falls back to an in-memory
 limiter). See [docs/architecture.md](docs/architecture.md) for why this is a
 deliberate design, not an accident.
 
+To run against a **real** Redis on Windows without Docker (e.g. to see the
+cache-aside entries or rate-limit counters yourself via `redis-cli`), install
+a portable build — no service/installer required:
+```powershell
+winget install --id taizod1024.redis-windows-fork -e
+# then, from the extracted folder (winget prints the path):
+.\redis-server.exe --port 6379
+```
+The app will pick it up automatically (`ioredis` reconnects on its own — no
+app restart needed) since `.env.example` already points `REDIS_URL` at
+`redis://localhost:6379`.
+
 ## Manual test UI
 
 Once the server is running, open **http://localhost:3000/ui/** for a minimal

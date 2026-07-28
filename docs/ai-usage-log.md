@@ -101,6 +101,25 @@ of the diff alone.
     interfere with, or be interfered by, every other test's quota usage on
     the shared per-IP limiter — a design decision made before writing the
     test, not a fix after the fact.
+- **Brought up a real Redis instance on request**, to validate both use
+  cases (cache-aside redirects, rate limiting) against genuine Redis rather
+  than a mock or its absence. Docker was still unavailable; Memurai (the
+  standard commercial option for Redis-on-Windows) was tried first and
+  failed with an MSI custom-action error ("failed to create temp directory",
+  unrelated to this project) — rather than spend more time fighting that
+  installer, switched to a portable community build of real upstream Redis
+  8.8 for Windows (`taizod1024/redis-windows`), which needed no installer at
+  all. Both use cases were then verified directly, not inferred: `redis-cli
+  GET shortUrl:<code>` showed the exact cached JSON and TTL after a redirect;
+  `redis-cli GET rl:create:<ip>` showed the real atomic counter climbing
+  and the 429 tripping at the configured threshold. This also surfaced a
+  latent test-isolation gap: the Playwright suite's two server instances
+  (the general "app" project and the dedicated "rate-limit" project) both
+  pointed at the same Redis with no per-project key separation, which had
+  been invisible while Redis was absent (each fell back independently to
+  its own in-memory limiter) but would have made the rate-limit test flaky
+  once a real, shared Redis was involved. Fixed by giving each project its
+  own Redis logical DB (`/0` and `/1`) in `playwright.config.ts`.
 
 ## Limitations of this traceability record
 
