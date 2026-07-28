@@ -51,7 +51,11 @@ export default defineConfig({
         PORT: String(APP_PORT),
         NODE_ENV: "test",
         DATABASE_URL,
-        REDIS_URL: "redis://localhost:6379",
+        // DB index 0: kept separate from the rate-limit project's DB 1 below. With a real
+        // Redis now available, both projects' rate-limiter keys would otherwise collide on
+        // the same client IP (rate-limiter-flexible's Redis key isn't port-scoped), which
+        // would make the dedicated low-quota rate-limit test flaky/meaningless.
+        REDIS_URL: "redis://localhost:6379/0",
         PUBLIC_BASE_URL: `http://localhost:${APP_PORT}`,
         CORS_ALLOWED_ORIGINS: `http://localhost:${APP_PORT}`,
         RATE_LIMIT_POINTS: "100",
@@ -67,7 +71,7 @@ export default defineConfig({
         PORT: String(RATE_LIMIT_PORT),
         NODE_ENV: "test",
         DATABASE_URL,
-        REDIS_URL: "redis://localhost:6379",
+        REDIS_URL: "redis://localhost:6379/1",
         PUBLIC_BASE_URL: `http://localhost:${RATE_LIMIT_PORT}`,
         CORS_ALLOWED_ORIGINS: `http://localhost:${RATE_LIMIT_PORT}`,
         RATE_LIMIT_POINTS: "3",
