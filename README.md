@@ -169,3 +169,5 @@ Full endpoint reference: [docs/api-documentation.md](docs/api-documentation.md).
   with before/after diff) / ambiguous-requirement worked examples.
 - [Engineering summary](docs/engineering-summary.md) — assumptions, risks,
   trade-offs, validation approach, limitations, lessons learned.
+- [Test cases](docs/test-cases.md) — manual test cases (ID'd, steps +
+  expected results) with a traceability matrix to the automated suites.
