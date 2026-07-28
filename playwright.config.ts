@@ -26,12 +26,12 @@ export default defineConfig({
       // low-quota server so it can't starve (or be starved by) anything else.
       name: "app",
       testMatch: /^(?!.*rate-limit).*\.spec\.ts$/,
-      use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${APP_PORT}` },
+      use: { ...devices["Desktop Chrome"], channel: "chrome", baseURL: `http://localhost:${APP_PORT}` },
     },
     {
       name: "rate-limit",
       testMatch: /rate-limit\.spec\.ts$/,
-      use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${RATE_LIMIT_PORT}` },
+      use: { ...devices["Desktop Chrome"], channel: "chrome", baseURL: `http://localhost:${RATE_LIMIT_PORT}` },
     },
   ],
   webServer: [
