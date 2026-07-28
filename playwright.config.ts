@@ -14,11 +14,18 @@ export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
   workers: 1,
-  reporter: "list",
-  timeout: 30_000,
+  // "list" prints live progress in the terminal; "html" produces a browsable
+  // report (screenshots/traces per test) opened afterwards with `npx playwright show-report`.
+  reporter: [["list"], ["html", { open: "never" }]],
+  timeout: 45_000,
   use: {
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    video: "retain-on-failure",
+    // Slows down each browser action so a headed run can be watched visually
+    // (does not affect direct API calls made via the `request` fixture, e.g.
+    // the rate-limit test's request bursts).
+    launchOptions: { slowMo: 750 },
   },
   projects: [
     {
