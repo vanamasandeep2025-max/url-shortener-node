@@ -103,7 +103,7 @@ async function loadUrls() {
     const tr = document.createElement('tr');
     if (!item.isActive) tr.classList.add('inactive');
     tr.innerHTML = `
-      <td><a class="code-link" href="${shortUrl}" target="_blank" rel="noopener">${code}</a></td>
+      <td><a class="code-link" href="${shortUrl}" target="_blank" rel="noopener">${code}</a>${item.hasPassword ? ' <span title="Password protected">🔒</span>' : ''}</td>
       <td class="long-url" title="${longUrl}">${longUrlDisplay}</td>
       <td><span class="badge ${status.cls}">${status.label}</span></td>
       <td>${stats.totalClicks}</td>
@@ -127,6 +127,7 @@ form.addEventListener('submit', async (e) => {
   const body = { url: fd.get('url') };
   if (fd.get('customAlias')) body.customAlias = fd.get('customAlias');
   if (fd.get('expiresAt')) body.expiresAt = new Date(fd.get('expiresAt')).toISOString();
+  if (fd.get('password')) body.password = fd.get('password');
 
   const res = await fetch('/api/urls', {
     method: 'POST',
