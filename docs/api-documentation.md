@@ -17,12 +17,13 @@ Create a short URL.
 | `url` | string | yes | Must be `http(s)`, ≤2048 chars. |
 | `customAlias` | string | no | 3-32 chars, `[A-Za-z0-9_-]`. If omitted, a random 7-char Base62 code is generated. |
 | `expiresAt` | string (ISO 8601) | no | Must be in the future. Omit for a link that never expires. |
+| `password` | string | no | 4-72 chars (bcrypt's byte limit). Hashed with bcrypt before storage — never stored or returned in plaintext. If set, `GET /:code` shows an unlock prompt instead of redirecting until unlocked. |
 
 **Responses**
 | Status | Meaning |
 |---|---|
-| `201` | Created. Body: `{ code, shortUrl, longUrl, createdAt, expiresAt, isActive }` |
-| `400` | `url` invalid, `customAlias` malformed, `expiresAt` invalid/in the past, or malformed JSON body. |
+| `201` | Created. Body: `{ code, shortUrl, longUrl, createdAt, expiresAt, isActive, hasPassword }` |
+| `400` | `url` invalid, `customAlias` malformed, `expiresAt` invalid/in the past, `password` outside 4-72 chars, or malformed JSON body. |
 | `409` | `customAlias` already in use. |
 | `429` | Rate limit exceeded (`RATE_LIMIT_POINTS` per `RATE_LIMIT_WINDOW_SECONDS` per IP). `Retry-After` header included. |
 | `503` | Could not find a free random code after 5 attempts (practically never at this code space size). |
@@ -41,11 +42,30 @@ Redirect to the long URL. Constrained to the same charset as codes/aliases
 | Status | Meaning |
 |---|---|
 | `302` | Redirects to the long URL. `Location` header set. A click is recorded asynchronously (never blocks or fails this response). |
+| `200` | The link is password-protected and not yet unlocked (no valid `unlock_<code>` cookie) — returns an HTML page with a password form, not a redirect. |
 | `404` | Code doesn't exist. |
 | `410` | Code existed but is expired or soft-deleted. |
 
 ```bash
 curl -i http://localhost:3000/my-link
+```
+
+## `POST /:code/unlock`
+
+Submits a password attempt for a protected link. Form-encoded
+(`application/x-www-form-urlencoded`), matching the plain HTML `<form>` the
+prompt page renders — works without JavaScript.
+
+**Request body**: `password` (string, required).
+
+| Status | Meaning |
+|---|---|
+| `302` | Correct password. Sets an HttpOnly, path-scoped (`/<code>`) cookie `unlock_<code>` (default 1h TTL, `LINK_UNLOCK_TTL_SECONDS`) so subsequent visits skip the prompt, then redirects to the long URL like `GET /:code` would. |
+| `401` | Incorrect password (or the link isn't password-protected/doesn't exist/is expired/deleted) — re-renders the prompt page with an error message. |
+| `429` | Too many attempts for this code+IP (`UNLOCK_RATE_LIMIT_POINTS` per `UNLOCK_RATE_LIMIT_WINDOW_SECONDS`), independent of the create-endpoint's rate limit. |
+
+```bash
+curl -i -X POST http://localhost:3000/my-link/unlock --data "password=letmein123"
 ```
 
 ## `GET /api/urls/:code/stats`

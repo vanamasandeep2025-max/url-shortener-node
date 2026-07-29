@@ -50,9 +50,22 @@ client → urlService.getRedirectTarget
        → Redis GET shortUrl:{code}  (cache hit → skip DB entirely)
        → on miss/error: Postgres findUnique → populate cache
        → 404 if missing, 410 if soft-deleted or expired
+       → hasPassword && no valid unlock_{code} cookie?
+             → 200 HTML password prompt (no redirect, no click recorded)
        → 302 to longUrl
        → (fire-and-forget, does not block the response) record click:
          shortUrlId, referrer, hashed IP, user-agent → Postgres
+```
+
+**Unlock** (`POST /:code/unlock`, password-protected links only)
+```
+client → unlock rate limiter (per IP+code, independent of the create limiter)
+       → urlService.verifyLinkPassword: fresh Postgres read (never cached --
+         the password hash never enters Redis), bcrypt.compare
+       → wrong → 401, re-render the prompt page with an error
+       → correct → sign a short-lived HMAC token, Set-Cookie unlock_{code}
+                   (HttpOnly, Path=/{code}, default 1h TTL)
+                → same as a normal redirect: record click, 302 to longUrl
 ```
 
 **Stats / List / Delete** — straightforward reads/writes against Postgres;
@@ -71,6 +84,9 @@ stale cache entry until TTL expiry.
 | Async, best-effort click recording | A slow or failing analytics write must never delay or fail the redirect itself, which is the actual product behavior users depend on. |
 | Zod at the HTTP boundary, plain functions for domain rules | Zod checks request *shape* (types, required fields); `urlService`/`urlValidator` check *domain* rules (URL scheme, alias charset, expiry-in-the-future). Keeping these separate avoids duplicating validation logic in two different languages (schema vs code). |
 | Centralized `AppError` hierarchy + one error-handling middleware | Every route throws a typed error (`NotFoundError`, `ConflictError`, ...) and a single middleware maps it to the right HTTP status and a consistent `{ error: { message, code } }` body, instead of each route hand-rolling status codes. |
+| Password hash never enters the Redis cache | The redirect cache entry carries a `hasPassword` boolean, not the hash itself. Verifying a password attempt (`verifyLinkPassword`) always re-reads Postgres directly. This keeps a rare, security-sensitive path off the hot-path cache entirely, at the cost of one extra query per unlock attempt (never per redirect). |
+| Stateless signed cookie for "already unlocked", not a session table | `unlockToken.ts` HMAC-signs `code + expiry` and verifies it with a timing-safe comparison — no server-side session store needed, and the token is inherently scoped to one code since the code is part of the signed payload. |
+| Plain HTML `<form>` for the unlock prompt, not a JS-driven flow | Works even with JavaScript disabled; keeps the password-entry UX resilient and simple, consistent with the rest of the dashboard's "progressively enhanced, not JS-required" posture for anything safety-critical. |
 
 ## Known limitations of this environment
 

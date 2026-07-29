@@ -21,12 +21,14 @@ direct questions before implementation). See
 [ai-usage-log.md](ai-usage-log.md) for exactly what was generated vs.
 engineer-directed.
 
-**Validation**: 34 unit tests (mocked dependencies) + 15 integration tests
-(real local Postgres, `ioredis-mock` for Redis) + a live server run driven
-with real `curl`/`Invoke-RestMethod` requests through every endpoint. This
-combination — not the test suite alone — is what surfaced the three defects
-below and in the ai-usage-log, which is the point: a green test suite from an
-AI-generated first pass is not sufficient evidence of correctness on its own.
+**Validation**: 50 unit tests (mocked dependencies) + 21 integration tests
+(real local Postgres, `ioredis-mock` for Redis) + 19 Playwright end-to-end
+tests (real browser) + a live server run driven with real `curl`/
+`Invoke-RestMethod` requests through every endpoint. This combination — not
+the test suite alone — is what surfaced the defects logged in
+[ai-usage-log.md](ai-usage-log.md), which is the point: a green test suite
+from an AI-generated first pass is not sufficient evidence of correctness on
+its own.
 
 ---
 

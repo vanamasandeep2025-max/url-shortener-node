@@ -70,7 +70,8 @@ of the diff alone.
   Express route param couldn't be inferred; fixed with an explicit generic).
 - `npx eslint` — caught and fixed a `no-require-imports` violation in a test
   file (rewritten to use static imports with `jest.mock` hoisting).
-- `npx jest` (unit + integration) — 49/49 passing as of the final commit.
+- `npx jest` (unit + integration) — 71/71 passing as of the final commit.
+- `npx playwright test` — 19/19 passing as of the final commit.
 - Live server run + manual `curl`/`Invoke-RestMethod` walkthrough of every
   endpoint, including the rate limiter and a genuinely-unreachable Redis.
 - A minimal manual test UI (`public/`, served at `/ui`) was built on request
@@ -120,6 +121,35 @@ of the diff alone.
   its own in-memory limiter) but would have made the rate-limit test flaky
   once a real, shared Redis was involved. Fixed by giving each project its
   own Redis logical DB (`/0` and `/1`) in `playwright.config.ts`.
+- **Password protection for links**, added on request after comparing this
+  app against a reference URL-shortener site (urlshort.dev) and confirming
+  scope directly with the engineer rather than guessing which of that site's
+  features ("Custom Link", "Set Expiration", "Password Protection", "Generate
+  QR Code", full campaign/analytics tooling) were actually in scope — only
+  password protection was requested; the rest was explicitly declined.
+  Implementation: `password_hash` column (bcrypt, cost 10), a `hasPassword`
+  boolean on the public DTO (the hash itself is never returned, never cached
+  in Redis, and re-read fresh from Postgres on every unlock attempt), a
+  stateless HMAC-signed cookie for "already unlocked" (no session table), a
+  plain-HTML unlock form (works without JavaScript), and its own rate limiter
+  keyed by IP+code so brute-forcing one link's password can't be masked by,
+  or drown out, traffic to any other link.
+  - **Found and root-caused a real Playwright test flakiness bug in this
+    session, not an app bug** — worth logging in detail since it looked, at
+    first glance, exactly like an app bug: a test submitting the correct
+    password after a wrong one appeared to never redirect. Root-caused via
+    the *server's own request log* (not guesswork): the log showed the
+    server correctly returning `302` with the right `Location` and
+    `Set-Cookie` in ~150ms every time, including with curl reproducing the
+    identical wrong-then-correct sequence. The actual issue was that the
+    test's destination was an external domain (`https://example.com/...`)
+    stubbed via `page.route()`, and redirect-driven cross-origin navigation
+    to that stub wasn't reliably intercepted in this environment — the
+    browser call hung waiting on the real network instead. Fixed by pointing
+    the test's destinations at the app's own origin instead of an external
+    domain, which is a more robust design for this kind of test regardless
+    of environment (no dependency on real network access or on redirect
+    interception behaving a particular way).
 
 ## Limitations of this traceability record
 

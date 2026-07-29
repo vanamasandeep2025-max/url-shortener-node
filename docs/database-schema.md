@@ -14,6 +14,7 @@ erDiagram
         timestamp created_at
         timestamp expires_at "nullable"
         boolean is_active
+        string password_hash "nullable"
     }
     click_events {
         int id PK
@@ -35,6 +36,7 @@ erDiagram
 | `created_at` | `TIMESTAMP` | Defaults to `now()`. |
 | `expires_at` | `TIMESTAMP NULL` | Optional. Checked, not enforced by deletion — an expired row still exists so its click history remains queryable via `/stats`. |
 | `is_active` | `BOOLEAN` | Soft-delete flag. `false` after `DELETE /api/urls/:code`. |
+| `password_hash` | `TEXT NULL` | bcrypt hash (cost 10) of an optional per-link password. `NULL` means the link isn't protected. Never sent to clients — the API only ever exposes a derived `hasPassword` boolean, and this column is deliberately excluded from the Redis cache entry too (see [architecture.md](architecture.md)). |
 
 ## `click_events`
 

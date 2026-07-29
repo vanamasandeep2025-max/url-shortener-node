@@ -9,7 +9,7 @@ both sections and in [ai-usage-log.md](ai-usage-log.md)/[scenarios.md](scenarios
 
 `TC-<AREA>-<NNN>` — areas: `CRT` create, `RDR` redirect, `STA` stats, `LST`
 list, `DEL` delete, `HLT` health, `UI` dashboard, `SEC` security, `REL`
-reliability.
+reliability, `PWD` password protection.
 
 ## How to execute
 
@@ -103,6 +103,21 @@ reliability.
 | TC-SEC-003 | Security headers present | Inspect any response's headers | `Content-Security-Policy`, `X-Content-Type-Options`, etc. (Helmet defaults) present |
 | TC-SEC-004 | CORS scoped | `fetch` the API from an origin not in `CORS_ALLOWED_ORIGINS` | Request blocked by the browser (no `Access-Control-Allow-Origin` for that origin) |
 
+### Password protection
+
+| ID | Title | Steps | Expected Result |
+|---|---|---|---|
+| TC-PWD-001 | Create with a password | POST with `password` (4-72 chars) | `201`; `hasPassword:true`; response never contains `password` or `passwordHash` |
+| TC-PWD-002 | Reject a too-short/too-long password | POST with `password` outside 4-72 chars | `400 BAD_REQUEST` |
+| TC-PWD-003 | Locked link shows a prompt, not a redirect | GET `/:code` for a password-protected link, no prior unlock | `200`, HTML page with a password form (not `302`) |
+| TC-PWD-004 | Wrong password rejected | POST `/:code/unlock` with the wrong password | `401`; re-rendered prompt shows "Incorrect password"; no click recorded; no cookie set |
+| TC-PWD-005 | Correct password unlocks | POST `/:code/unlock` with the right password | `302` to the long URL; `Set-Cookie: unlock_<code>=...` (HttpOnly, `Path=/<code>`); click recorded |
+| TC-PWD-006 | Unlock cookie remembered | Revisit `GET /:code` with the unlock cookie from TC-PWD-005 | `302` directly, no prompt |
+| TC-PWD-007 | Fresh client still gets the prompt | GET `/:code` from a client with no unlock cookie, after TC-PWD-005 | `200`, prompt page (cookie is per-client) |
+| TC-PWD-008 | Unlock attempts are rate-limited | POST `/:code/unlock` repeatedly with wrong passwords beyond `UNLOCK_RATE_LIMIT_POINTS` | Eventually `429 TOO_MANY_REQUESTS` |
+| TC-PWD-009 | Unprotected link is never gated | GET `/:code` for a link created without a `password` | `302` directly, no prompt |
+| TC-PWD-010 | Dashboard shows a lock indicator | Create a password-protected link via `/ui` | Table row shows a 🔒 indicator next to the code |
+
 ### Reliability
 
 | ID | Title | Steps | Expected Result |
@@ -161,10 +176,21 @@ reliability.
 | TC-REL-002 | "rate limits rapid link creation…" | E2E | `tests/e2e/rate-limit.spec.ts` |
 | TC-REL-003 | "retries on a code collision and succeeds…" / "gives up after repeated collisions" | Unit | `urlService.test.ts` |
 | TC-REL-004 | 🖐 manual-only | — | — |
+| TC-PWD-001 | "hashes a provided password…" / "creates a password-protected link without ever returning the password/hash" | Unit + Integration | `urlService.test.ts`, `api.test.ts` |
+| TC-PWD-002 | "rejects a password shorter than…" / "…longer than bcrypt's 72-byte limit" | Unit | `urlService.test.ts` |
+| TC-PWD-003 | "shows a password prompt instead of redirecting when locked" | Integration + E2E | `api.test.ts`, `password-protection.spec.ts` |
+| TC-PWD-004 | "rejects an incorrect password with 401…" | Unit + Integration + E2E | `urlService.test.ts` (`verifyLinkPassword`), `api.test.ts`, `password-protection.spec.ts` |
+| TC-PWD-005 | "unlocks with the correct password, sets a cookie…" | Integration + E2E | `api.test.ts`, `password-protection.spec.ts` |
+| TC-PWD-006 | "…skips the prompt on the next visit" | Integration + E2E | `api.test.ts`, `password-protection.spec.ts` |
+| TC-PWD-007 | 🖐 manual-only (implicitly covered: the integration test's "fresh visit" assertion uses a separate, cookie-less request) | Integration (implicit) | `api.test.ts` |
+| TC-PWD-008 | "rate limits repeated wrong-password attempts against a single link" | Integration | `api.test.ts` |
+| TC-PWD-009 | "does not gate a link with no password" / "a link created without a password is never gated" | Integration + E2E | `api.test.ts`, `password-protection.spec.ts` |
+| TC-PWD-010 | "dashboard shows a lock indicator for password-protected links" | E2E | `password-protection.spec.ts` |
 
 ### Coverage summary
 
-- **65 automated tests** total: 34 Jest unit, 15 Jest integration, 16 Playwright e2e.
+- **90 automated tests** total: 50 Jest unit, 21 Jest integration, 19
+  Playwright e2e.
 - **Manual-only, by design**: cases that need wall-clock timing judgment
   (TC-RDR-006), infrastructure states awkward to script reliably in this
   environment (TC-HLT-002/003 — no easy way to kill Postgres mid-suite

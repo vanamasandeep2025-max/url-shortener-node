@@ -4,9 +4,10 @@
 
 A URL shortener: Express/TypeScript REST API, PostgreSQL storage (via
 Prisma), Redis-backed redirect caching and rate limiting (both designed to
-fail open), click analytics, and Docker artifacts for deployment. See
-[architecture.md](architecture.md) for component/flow diagrams and
-[database-schema.md](database-schema.md) for the data model.
+fail open), click analytics, optional bcrypt-hashed password protection per
+link, and Docker artifacts for deployment. See [architecture.md](architecture.md)
+for component/flow diagrams and [database-schema.md](database-schema.md) for
+the data model.
 
 ## Assumptions made (requirement was silent or ambiguous on these points)
 
@@ -31,6 +32,12 @@ fail open), click analytics, and Docker artifacts for deployment. See
 - **Multi-tenancy/auth**: not mentioned → none built. Every link is globally
   readable/listable/deletable by code. This is a real gap for anything beyond
   a prototype, flagged here rather than silently accepted.
+- **Feature scope vs. a reference competitor site**: asked to compare against
+  urlshort.dev, which bundles custom aliases, expiration, password protection,
+  QR codes, custom domains, and full campaign/analytics tooling. Rather than
+  assume which of these to build, scope was confirmed directly — only
+  password protection was requested; QR codes, custom domains, and campaign
+  tooling were explicitly out of scope, not silently deferred.
 
 ## Risks and edge cases
 
@@ -75,6 +82,14 @@ fail open), click analytics, and Docker artifacts for deployment. See
 - Client IPs are hashed (SHA-256, truncated) before storage, not stored raw.
 - No secrets are hardcoded; DB/Redis credentials come from environment
   variables (`.env`, not committed — see `.gitignore`).
+- **Passwords are bcrypt-hashed (cost 10)**, never stored or returned in
+  plaintext; the API only ever exposes a derived `hasPassword` boolean. The
+  hash is deliberately kept out of the Redis cache, re-read fresh from
+  Postgres on every unlock attempt. Password attempts are rate-limited
+  per IP+code (`UNLOCK_RATE_LIMIT_POINTS`/`_WINDOW_SECONDS`), independent of
+  the create-endpoint's limiter, so brute-forcing one link can't hide behind
+  — or be masked by — traffic to any other link. The "already unlocked"
+  cookie is HttpOnly, `SameSite=Lax`, and path-scoped to `/<code>`.
 - **Stored data is not HTML-safe by construction.** `longUrl` is validated as
   a well-formed `http(s)` URL but not sanitized against HTML-breaking
   characters, and click `referrer`/`user-agent` are raw request headers with
@@ -96,18 +111,24 @@ fail open), click analytics, and Docker artifacts for deployment. See
 | `ioredis-mock` for integration tests, no real Redis at all | Tests run without any Redis installation, at the cost of not validating actual Redis wire-protocol behavior (Lua scripting for the rate limiter, real network failure modes) — only the app's handling of success/error responses from a Redis-shaped client. |
 | `enableOfflineQueue: false` on the Redis client | Fast, predictable fail-open on a hard outage, at the cost of less tolerance for a merely-slow-but-recovering Redis mid-command (see [scenarios.md](scenarios.md)). |
 | Soft delete, no hard-delete path | Preserves analytics history, at the cost of `short_urls` growing unboundedly (no archival/purge job). |
+| Stateless signed cookie for link-unlock state, not a session table | No extra schema/infra, and inherently self-expiring, at the cost of no server-side way to revoke a single issued unlock early (short of rotating `LINK_UNLOCK_SECRET`, which invalidates all of them). |
 
 ## Validation approach
 
 - **Static**: `tsc --noEmit` (clean), `eslint` (clean after one fix — see
   [ai-usage-log.md](ai-usage-log.md)).
-- **Unit**: 34 tests, Jest, fully mocked Prisma/Redis — covers code
-  generation/collision retry, URL validation, and every branch of the service
-  layer (happy path, expiry, soft delete, cache hit/miss, Redis failure).
-- **Integration**: 15 tests, Supertest against the real Express app, a real
+- **Unit**: 50 tests, Jest, fully mocked Prisma/Redis — covers code
+  generation/collision retry, URL validation, every branch of the service
+  layer (happy path, expiry, soft delete, cache hit/miss, Redis failure), and
+  password hashing/verification plus the signed-unlock-token helper
+  (round-trip, wrong code, expired, tampered signature).
+- **Integration**: 21 tests, Supertest against the real Express app, a real
   local PostgreSQL database, and `ioredis-mock` — exercises every endpoint's
   success and error paths (400/404/409/410) through an actual database, with
-  data reset between tests.
+  data reset between tests. Includes the full password-protection flow:
+  create → prompt → wrong password (401, no click recorded) → correct
+  password (302 + cookie set) → cookie remembered on revisit → unlock rate
+  limiting.
 - **Live**: the compiled server, run for real and driven with `curl`/
   `Invoke-RestMethod` through every endpoint, the rate limiter, and the
   redirect path with Redis genuinely unreachable. This step — not the
@@ -118,15 +139,18 @@ fail open), click analytics, and Docker artifacts for deployment. See
   of only curl. Used directly in a real browser session (create → redirect →
   stats all confirmed working); building it also prompted the review that
   caught the fourth bug (`includeInactive=false` being coerced to `true`).
-- **Browser (automated)**: a 16-test Playwright suite (`tests/e2e/`) drives a
+- **Browser (automated)**: a 19-test Playwright suite (`tests/e2e/`) drives a
   real Chromium browser against the dashboard — create flows, validation and
   conflict errors, list/delete/toggle (with a regression test for bug #4),
   click tracking through to the Details view, copy-to-clipboard, a
-  stored-XSS regression test for bug #5, and rate limiting (against its own
-  isolated server instance so it can't interfere with other tests' quota).
-  See [ai-usage-log.md](ai-usage-log.md) for two test-authoring mistakes this
-  suite's first run caught and fixed, and [scenarios.md](scenarios.md) for how
-  it was decomposed and executed.
+  stored-XSS regression test for bug #5, password-protected links end to end
+  (prompt → wrong password → correct password → cookie remembered), and rate
+  limiting (against its own isolated server instance so it can't interfere
+  with other tests' quota). See [ai-usage-log.md](ai-usage-log.md) for
+  test-authoring mistakes this suite caught in itself (including one in the
+  password-protection tests root-caused to unreliable cross-origin redirect
+  interception, not an app bug), and [scenarios.md](scenarios.md) for how it
+  was decomposed and executed.
 - **Live Redis**: a real Redis 8.8 instance (portable Windows build, since
   Docker/Memurai were both unavailable — see [architecture.md](architecture.md))
   was brought up and both use cases re-verified directly against it: the
@@ -155,3 +179,11 @@ fail open), click analytics, and Docker artifacts for deployment. See
   latency under a real outage turns it into a claim about behavior. The Redis
   latency bug would have shipped in a session that stopped at "the try/catch
   is there."
+- When a browser test's behavior contradicts what the server logs show, trust
+  the server log. A password-protection test that looked like a server bug
+  (correct password rejected) turned out, once the server's own request log
+  was checked, to be an app-server responding correctly every time — the gap
+  was in how the test verified success (following a real cross-origin
+  redirect), not in application logic. Reproducing via `curl` first, then
+  instrumenting the actual browser network calls, found the real cause
+  faster than reasoning about the app code in isolation would have.

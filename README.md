@@ -9,25 +9,32 @@ for deployment.
 > Docker/WSL2, so `docker compose up --build` has **not** been executed here
 > — the Dockerfile/docker-compose.yml represent the intended deployment path
 > but are untested in this session. Everything else *was* actually run: the
-> full backend test suite (49/49 passing) against a real, natively-installed
-> PostgreSQL, a 16-test Playwright suite driving a real browser against the
+> full backend test suite (71/71 passing) against a real, natively-installed
+> PostgreSQL, a 19-test Playwright suite driving a real browser against the
 > dashboard, plus a live server run driven with real `curl` requests through
-> every endpoint. See [docs/architecture.md](docs/architecture.md#known-limitations-of-this-environment)
+> every endpoint (including a real Redis instance for the caching and
+> rate-limiting paths — see below). See [docs/architecture.md](docs/architecture.md#known-limitations-of-this-environment)
 > and [docs/ai-usage-log.md](docs/ai-usage-log.md) for exactly what was and
-> wasn't verified, including five real bugs this validation found and fixed
-> (three API-level, one Zod query-param footgun, and one stored-XSS finding).
+> wasn't verified, including six real bugs this validation found and fixed
+> (three API-level, one Zod query-param footgun, one stored-XSS finding, and
+> one Playwright test-flakiness root-caused to a browser networking quirk,
+> not the app).
 
 ## Features
 
 - Create a short URL from any `http(s)` long URL, with an optional custom
-  alias and an optional expiry.
+  alias, an optional expiry, and an optional **password** (bcrypt-hashed,
+  never stored or returned in plaintext).
 - Redirect short → long URL (`302`), with Redis cache-aside on the hot path
-  and a fast fail-open to Postgres if Redis is down.
+  and a fast fail-open to Postgres if Redis is down. A password-protected
+  link instead shows a small unlock page (plain HTML form, works without
+  JavaScript); a short-lived signed cookie remembers a successful unlock so
+  the visitor isn't re-prompted on every click.
 - Click analytics: total clicks + paginated recent click events (timestamp,
   referrer, user-agent).
 - Reliability: collision-checked code generation, Redis-backed rate limiting
-  (with an in-memory fallback if Redis is unavailable), soft delete, health
-  endpoint, graceful shutdown.
+  on both link creation and password attempts (with an in-memory fallback if
+  Redis is unavailable), soft delete, health endpoint, graceful shutdown.
 - Consistent JSON error responses with correct HTTP status codes.
 
 ## Project layout
@@ -114,10 +121,10 @@ part of the production API surface.
 ## Running tests
 
 ```bash
-npm run test:unit         # 34 tests, fully mocked, no infra needed
-npm run test:integration  # 15 tests, needs a running Postgres pointed at by DATABASE_URL
-npm test                  # both (49 tests)
-npm run test:e2e          # 16 Playwright tests, drives a real browser against the real app
+npm run test:unit         # 50 tests, fully mocked, no infra needed
+npm run test:integration  # 21 tests, needs a running Postgres pointed at by DATABASE_URL
+npm test                  # both (71 tests)
+npm run test:e2e          # 19 Playwright tests, drives a real browser against the real app
 ```
 
 Integration tests use `ioredis-mock` in place of a real Redis client (see
@@ -137,12 +144,13 @@ server-side validation errors, alias conflicts, the empty state, delete +
 "Show deleted" toggle (including a regression guard for the
 `includeInactive` coercion bug), click tracking end-to-end through the
 redirect into the Details view, copy-to-clipboard, a stored-XSS regression
-test (malicious `longUrl` and malicious `referrer`/`user-agent`), and rate
-limiting — the last one runs against its own isolated server instance
-(`RATE_LIMIT_POINTS=3`) so it can't starve, or be starved by, any other test's
-quota. See [docs/scenarios.md](docs/scenarios.md) and
-[docs/ai-usage-log.md](docs/ai-usage-log.md) for how this suite was built and
-what it caught.
+test (malicious `longUrl` and malicious `referrer`/`user-agent`),
+password-protected links (prompt → wrong password → correct password →
+remembered via cookie), and rate limiting — the last one runs against its
+own isolated server instance (`RATE_LIMIT_POINTS=3`) so it can't starve, or
+be starved by, any other test's quota. See [docs/scenarios.md](docs/scenarios.md)
+and [docs/ai-usage-log.md](docs/ai-usage-log.md) for how this suite was built
+and what it caught.
 
 ## API quick reference
 
@@ -152,8 +160,16 @@ curl -X POST http://localhost:3000/api/urls \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com/a/very/long/path"}'
 
+# Create a password-protected short URL
+curl -X POST http://localhost:3000/api/urls \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/secret", "password": "letmein123"}'
+
 # Follow it
 curl -i http://localhost:3000/<code>
+
+# Unlock a password-protected one (form-encoded, matches the HTML prompt page)
+curl -i -X POST http://localhost:3000/<code>/unlock --data "password=letmein123"
 
 # Check analytics
 curl http://localhost:3000/api/urls/<code>/stats
