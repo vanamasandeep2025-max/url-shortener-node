@@ -34,6 +34,7 @@ import {
   getStats,
   recordClick,
   softDeleteUrl,
+  verifyLinkPassword,
 } from "../../src/services/urlService";
 
 function uniqueConstraintError() {
@@ -50,6 +51,7 @@ const baseRecord = {
   createdAt: new Date("2026-01-01T00:00:00Z"),
   expiresAt: null as Date | null,
   isActive: true,
+  passwordHash: null as string | null,
 };
 
 describe("createShortUrl", () => {
@@ -110,6 +112,84 @@ describe("createShortUrl", () => {
       createShortUrl({ longUrl: "https://example.com", customAlias: "taken-alias" }),
     ).rejects.toBeInstanceOf(ConflictError);
   });
+
+  it("hashes a provided password before it ever reaches the database", async () => {
+    (prisma.shortUrl.create as jest.Mock).mockImplementationOnce(({ data }) =>
+      Promise.resolve({ ...baseRecord, passwordHash: data.passwordHash }),
+    );
+
+    const result = await createShortUrl({ longUrl: "https://example.com", password: "correct-horse" });
+
+    const createArgs = (prisma.shortUrl.create as jest.Mock).mock.calls[0][0];
+    expect(createArgs.data.passwordHash).toEqual(expect.any(String));
+    expect(createArgs.data.passwordHash).not.toBe("correct-horse");
+    expect(result.hasPassword).toBe(true);
+    // Never leak the hash itself in the API-facing DTO.
+    expect(result).not.toHaveProperty("passwordHash");
+  });
+
+  it("rejects a password shorter than the minimum length", async () => {
+    await expect(createShortUrl({ longUrl: "https://example.com", password: "abc" })).rejects.toBeInstanceOf(
+      BadRequestError,
+    );
+    expect(prisma.shortUrl.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a password longer than bcrypt's 72-byte limit", async () => {
+    await expect(
+      createShortUrl({ longUrl: "https://example.com", password: "x".repeat(73) }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+  });
+
+  it("reports hasPassword: false when no password is given", async () => {
+    (prisma.shortUrl.create as jest.Mock).mockResolvedValueOnce(baseRecord);
+    const result = await createShortUrl({ longUrl: "https://example.com" });
+    expect(result.hasPassword).toBe(false);
+  });
+});
+
+describe("verifyLinkPassword", () => {
+  it("returns false when the link doesn't exist", async () => {
+    (prisma.shortUrl.findUnique as jest.Mock).mockResolvedValueOnce(null);
+    await expect(verifyLinkPassword("missing", "anything")).resolves.toBe(false);
+  });
+
+  it("returns false when the link has no password set", async () => {
+    (prisma.shortUrl.findUnique as jest.Mock).mockResolvedValueOnce(baseRecord);
+    await expect(verifyLinkPassword("abc1234", "anything")).resolves.toBe(false);
+  });
+
+  it("returns false for a soft-deleted link even with the right password", async () => {
+    (prisma.shortUrl.findUnique as jest.Mock).mockResolvedValueOnce({
+      ...baseRecord,
+      isActive: false,
+      passwordHash: "$2a$10$abcdefghijklmnopqrstuuC0z8h6l6qk5h0Zt5m1i6oQ9nF6cGZW6",
+    });
+    await expect(verifyLinkPassword("abc1234", "correct-horse")).resolves.toBe(false);
+  });
+
+  it("returns false for an expired link even with the right password", async () => {
+    (prisma.shortUrl.findUnique as jest.Mock).mockResolvedValueOnce({
+      ...baseRecord,
+      expiresAt: new Date("2020-01-01T00:00:00Z"),
+      passwordHash: "$2a$10$abcdefghijklmnopqrstuuC0z8h6l6qk5h0Zt5m1i6oQ9nF6cGZW6",
+    });
+    await expect(verifyLinkPassword("abc1234", "correct-horse")).resolves.toBe(false);
+  });
+
+  it("round-trips a real hash: correct password verifies, wrong password doesn't", async () => {
+    (prisma.shortUrl.create as jest.Mock).mockImplementationOnce(({ data }) =>
+      Promise.resolve({ ...baseRecord, passwordHash: data.passwordHash }),
+    );
+    await createShortUrl({ longUrl: "https://example.com", password: "correct-horse" });
+    const storedHash = (prisma.shortUrl.create as jest.Mock).mock.calls[0][0].data.passwordHash;
+
+    (prisma.shortUrl.findUnique as jest.Mock).mockResolvedValueOnce({ ...baseRecord, passwordHash: storedHash });
+    await expect(verifyLinkPassword("abc1234", "correct-horse")).resolves.toBe(true);
+
+    (prisma.shortUrl.findUnique as jest.Mock).mockResolvedValueOnce({ ...baseRecord, passwordHash: storedHash });
+    await expect(verifyLinkPassword("abc1234", "wrong-password")).resolves.toBe(false);
+  });
 });
 
 describe("getRedirectTarget", () => {
@@ -119,18 +199,18 @@ describe("getRedirectTarget", () => {
 
   it("returns the target from a cache hit without querying the database", async () => {
     (redis.get as jest.Mock).mockResolvedValueOnce(
-      JSON.stringify({ id: 1, longUrl: "https://example.com", isActive: true, expiresAt: null }),
+      JSON.stringify({ id: 1, longUrl: "https://example.com", isActive: true, expiresAt: null, hasPassword: false }),
     );
 
     const result = await getRedirectTarget("abc1234");
 
-    expect(result).toEqual({ shortUrlId: 1, longUrl: "https://example.com" });
+    expect(result).toEqual({ shortUrlId: 1, longUrl: "https://example.com", hasPassword: false });
     expect(prisma.shortUrl.findUnique).not.toHaveBeenCalled();
   });
 
   it("throws Gone for a cached but soft-deleted entry", async () => {
     (redis.get as jest.Mock).mockResolvedValueOnce(
-      JSON.stringify({ id: 1, longUrl: "https://example.com", isActive: false, expiresAt: null }),
+      JSON.stringify({ id: 1, longUrl: "https://example.com", isActive: false, expiresAt: null, hasPassword: false }),
     );
 
     await expect(getRedirectTarget("abc1234")).rejects.toBeInstanceOf(GoneError);
@@ -142,8 +222,17 @@ describe("getRedirectTarget", () => {
 
     const result = await getRedirectTarget("abc1234");
 
-    expect(result).toEqual({ shortUrlId: 1, longUrl: "https://example.com" });
+    expect(result).toEqual({ shortUrlId: 1, longUrl: "https://example.com", hasPassword: false });
     expect(redis.set).toHaveBeenCalled();
+  });
+
+  it("reports hasPassword: true for a password-protected link", async () => {
+    (redis.get as jest.Mock).mockResolvedValueOnce(null);
+    (prisma.shortUrl.findUnique as jest.Mock).mockResolvedValueOnce({ ...baseRecord, passwordHash: "$2a$10$fixture" });
+
+    const result = await getRedirectTarget("abc1234");
+
+    expect(result.hasPassword).toBe(true);
   });
 
   it("throws NotFound when the code doesn't exist", async () => {
