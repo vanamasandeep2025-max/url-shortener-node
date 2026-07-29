@@ -10,6 +10,12 @@ const envSchema = z.object({
   CORS_ALLOWED_ORIGINS: z.string().default("http://localhost:3000"),
   RATE_LIMIT_POINTS: z.coerce.number().int().positive().default(20),
   RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  // Signs the short-lived "already unlocked this password-protected link" cookie.
+  // Dev default is fine locally; must be overridden with a real secret in production.
+  LINK_UNLOCK_SECRET: z.string().min(1).default("dev-only-unlock-secret-change-me"),
+  LINK_UNLOCK_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
+  UNLOCK_RATE_LIMIT_POINTS: z.coerce.number().int().positive().default(10),
+  UNLOCK_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(300),
 });
 
 const parsed = envSchema.safeParse(process.env);

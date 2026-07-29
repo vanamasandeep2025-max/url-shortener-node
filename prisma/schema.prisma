@@ -8,13 +8,14 @@ datasource db {
 }
 
 model ShortUrl {
-  id          Int          @id @default(autoincrement())
-  code        String       @unique
-  longUrl     String       @map("long_url")
-  createdAt   DateTime     @default(now()) @map("created_at")
-  expiresAt   DateTime?    @map("expires_at")
-  isActive    Boolean      @default(true) @map("is_active")
-  clickEvents ClickEvent[]
+  id           Int          @id @default(autoincrement())
+  code         String       @unique
+  longUrl      String       @map("long_url")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  expiresAt    DateTime?    @map("expires_at")
+  isActive     Boolean      @default(true) @map("is_active")
+  passwordHash String?      @map("password_hash")
+  clickEvents  ClickEvent[]
 
   @@map("short_urls")
 }
