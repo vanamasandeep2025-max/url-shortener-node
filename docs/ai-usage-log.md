@@ -34,7 +34,7 @@ actually running the code.
 All application code (`src/`), tests (`tests/`), config, and this
 documentation set were AI-generated in an initial pass based on the plan
 above. The engineer's review gate was **running it for real**, not
-line-by-line code reading — and that gate caught four genuine defects the
+line-by-line code reading — and that gate caught six genuine defects the
 AI's own first pass had introduced and its own written tests had not caught:
 
 | # | Defect | How it was found | Fix |
@@ -44,9 +44,10 @@ AI's own first pass had introduced and its own written tests had not caught:
 | 3 | Malformed request JSON produced a `500` instead of a `400`. `express.json()`/body-parser attaches `status`/`statusCode` to its `SyntaxError`, but the error handler only special-cased the app's own `AppError` hierarchy, so this fell through to the generic 500 branch and was logged as an "unhandled error". | Found while investigating an unrelated PowerShell/curl quoting bug in a manual test — the malformed-JSON path the quoting bug accidentally exercised returned the wrong status. | `errorHandler` now recognizes any `Error` with a numeric `status`/`statusCode` in the 4xx range and returns that status instead of falling through to 500 ([src/middleware/errorHandler.ts](../src/middleware/errorHandler.ts)). Added a regression test for it. |
 | 4 | `GET /api/urls?includeInactive=false` still returned soft-deleted links — the literal string `"false"` was being coerced to `true`. | Noticed the risk while building the manual test UI (which calls this endpoint), then confirmed it live: created a link, soft-deleted it, and queried with `includeInactive=false`, which incorrectly returned it. | `z.coerce.boolean()` runs `Boolean(str)`, and `Boolean("false")` is `true` — a well-known Zod footgun. Replaced with an explicit `z.enum(["true","false"]).transform(v => v === "true")` ([src/routes/urls.ts](../src/routes/urls.ts)). Added a regression test. |
 | 5 | Stored XSS in the manual test UI: `longUrl` (only checked for a valid `http(s)` scheme, never HTML-sanitized) and click `referrer`/`user-agent` (raw, fully attacker-controlled request headers) were interpolated straight into `innerHTML` when the dashboard was redesigned. | Self-caught during the redesign, before shipping it: confirmed exploitable by `POST`-ing `{"url":"https://example.com/\"><img src=x onerror=alert(1)>"}` and observing the API accept and store it verbatim (the URL validator checks `new URL()` parses and the scheme is allowed, not that the string is free of HTML-breaking characters). | Added an `escapeHtml()` helper in [public/app.js](../public/app.js) and applied it to every value from the API before it's placed in `innerHTML` (`longUrl`, `code`, `shortUrl`, `referrer`, `userAgent`). The API itself still stores the raw URL (needed for exact redirects); the fix is encode-on-output in the UI, not mangling stored data. |
+| 6 | Password-protected links: entering the correct password appeared to do nothing — the browser never navigated to the destination. Reported live by the engineer against a real external URL, after an earlier Playwright test had hit the identical symptom and been (wrongly) attributed to test-environment flakiness rather than an app bug — see the full corrected account below. | Server request log showed a correct `302`/`Location`/`Set-Cookie` every time; the actual cause was Helmet's default CSP `form-action 'self'`, which blocks a *form submission's resulting redirect* from crossing origins, confirmed by inspecting the `Content-Security-Policy` response header directly. | Widened `form-action` to `'self' https: http:` in [src/app.ts](../src/app.ts) — intentional, since this app's product is redirecting to arbitrary http(s) URLs by design. Verified with a real Playwright-driven Chrome session navigating through to a genuine cross-origin destination, not just curl (curl doesn't enforce CSP, so it couldn't have caught this). |
 
-Each fix was re-verified by rerunning the full test suite (`npx jest`, 49/49
-passing throughout — defect #5 is client-side JS with no automated test
+Each fix was re-verified by rerunning the full test suite (`npx jest`, 71/71
+passing throughout, plus 19/19 Playwright — defect #5 is client-side JS with no automated test
 harness in this project, so it was verified manually instead, see below) and
 repeating the live `curl`/browser walkthrough — not accepted on the strength
 of the diff alone.
@@ -134,22 +135,38 @@ of the diff alone.
   plain-HTML unlock form (works without JavaScript), and its own rate limiter
   keyed by IP+code so brute-forcing one link's password can't be masked by,
   or drown out, traffic to any other link.
-  - **Found and root-caused a real Playwright test flakiness bug in this
-    session, not an app bug** — worth logging in detail since it looked, at
-    first glance, exactly like an app bug: a test submitting the correct
-    password after a wrong one appeared to never redirect. Root-caused via
-    the *server's own request log* (not guesswork): the log showed the
-    server correctly returning `302` with the right `Location` and
-    `Set-Cookie` in ~150ms every time, including with curl reproducing the
-    identical wrong-then-correct sequence. The actual issue was that the
-    test's destination was an external domain (`https://example.com/...`)
-    stubbed via `page.route()`, and redirect-driven cross-origin navigation
-    to that stub wasn't reliably intercepted in this environment — the
-    browser call hung waiting on the real network instead. Fixed by pointing
-    the test's destinations at the app's own origin instead of an external
-    domain, which is a more robust design for this kind of test regardless
-    of environment (no dependency on real network access or on redirect
-    interception behaving a particular way).
+  - **A test failure was initially misdiagnosed, then correctly root-caused
+    after a real user hit the same bug live** — logged in full because the
+    correction matters as much as the original finding. A Playwright test
+    submitting the correct password after a wrong one appeared to never
+    redirect. First investigation used the *server's own request log* (not
+    guesswork) and confirmed the server was always returning `302` with the
+    right `Location` and `Set-Cookie` in ~150ms, reproducible identically via
+    curl. **That part of the diagnosis was correct.** But the conclusion drawn
+    from it — "redirect-driven cross-origin navigation to `page.route()`
+    stubs isn't reliably intercepted in this environment" — was wrong, and
+    was accepted too quickly because the workaround (pointing the test's
+    destination at the app's own origin) made the test pass. The real cause
+    surfaced only when the engineer reported the identical symptom against a
+    real external destination in a real browser (not a test): Helmet's
+    default Content-Security-Policy sets `form-action 'self'`, which restricts
+    not just where a `<form>` can submit, but **the final destination after
+    any server-side redirect that submission triggers** — so the browser was
+    silently refusing to follow the unlock form's redirect to any
+    cross-origin URL, exactly matching "server responds correctly, browser
+    visibly does nothing." Confirmed via the CSP header on the response
+    itself, then fixed in `src/app.ts` by widening `form-action` to allow
+    `http:`/`https:` — an intentional relaxation, not a weakening, since this
+    app's entire product is redirecting to arbitrary http(s) URLs by design
+    (see engineering-summary.md's "Open redirect by design" note). The
+    Playwright test was reverted to use a genuine cross-origin destination
+    (with `page.route()` stubbing, which was never actually the problem) so
+    it once again catches a regression of the real bug — the earlier
+    same-origin version would never have caught it. **Lesson**: a workaround
+    that makes a test pass is not the same as a root cause, and should be
+    labeled as "test now passes" rather than "bug understood" until the
+    mechanism is actually confirmed (here, by reading the CSP header) rather
+    than merely no-longer-triggered.
 
 ## Limitations of this traceability record
 

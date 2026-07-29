@@ -17,8 +17,10 @@ for deployment.
 > and [docs/ai-usage-log.md](docs/ai-usage-log.md) for exactly what was and
 > wasn't verified, including six real bugs this validation found and fixed
 > (three API-level, one Zod query-param footgun, one stored-XSS finding, and
-> one Playwright test-flakiness root-caused to a browser networking quirk,
-> not the app).
+> one CSP `form-action` bug that silently blocked password-unlock redirects
+> to external destinations — found live, and honestly, only after an earlier
+> misdiagnosis of the same symptom as test flakiness; the correction is
+> logged too, not just the fix).
 
 ## Features
 

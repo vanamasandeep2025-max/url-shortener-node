@@ -90,6 +90,14 @@ the data model.
   the create-endpoint's limiter, so brute-forcing one link can't hide behind
   — or be masked by — traffic to any other link. The "already unlocked"
   cookie is HttpOnly, `SameSite=Lax`, and path-scoped to `/<code>`.
+- **CSP `form-action` is intentionally widened to `'self' https: http:`**,
+  not left at Helmet's default `'self'`. That default blocks not just where a
+  `<form>` can submit, but the *destination of any redirect that submission's
+  response triggers* — which broke the password-unlock form for every
+  cross-origin destination (a real bug found live and fixed; see
+  [ai-usage-log.md](ai-usage-log.md) defect #6). Since this app's whole
+  product is redirecting to arbitrary http(s) URLs, restricting `form-action`
+  to same-origin was never actually the intended boundary here.
 - **Stored data is not HTML-safe by construction.** `longUrl` is validated as
   a well-formed `http(s)` URL but not sanitized against HTML-breaking
   characters, and click `referrer`/`user-agent` are raw request headers with
@@ -147,10 +155,11 @@ the data model.
   (prompt → wrong password → correct password → cookie remembered), and rate
   limiting (against its own isolated server instance so it can't interfere
   with other tests' quota). See [ai-usage-log.md](ai-usage-log.md) for
-  test-authoring mistakes this suite caught in itself (including one in the
-  password-protection tests root-caused to unreliable cross-origin redirect
-  interception, not an app bug), and [scenarios.md](scenarios.md) for how it
-  was decomposed and executed.
+  test-authoring mistakes this suite caught in itself, plus a real app bug
+  (#6, the CSP `form-action` issue above) whose first diagnosis wrongly
+  blamed the test environment before a live user report forced a proper
+  root-cause, and [scenarios.md](scenarios.md) for how it was decomposed and
+  executed.
 - **Live Redis**: a real Redis 8.8 instance (portable Windows build, since
   Docker/Memurai were both unavailable — see [architecture.md](architecture.md))
   was brought up and both use cases re-verified directly against it: the
@@ -167,10 +176,13 @@ the data model.
 ## Lessons learned
 
 - Actually running the code — not just writing tests for it — is what caught
-  every real bug in this session. All three were invisible to a first read of
-  the diff and two were invisible to the unit test suite as originally
-  written, because they lived exactly at the seams the mocks stood in for
-  (route→service field mapping, and real vs. mocked Redis timing behavior).
+  every real bug in this session, all six of them. Most were invisible to a
+  first read of the diff, and several were invisible to the unit test suite
+  as originally written, because they lived exactly at the seams mocks stand
+  in for (route→service field mapping, real vs. mocked Redis timing behavior,
+  and — for the CSP bug — the fact that curl doesn't enforce CSP at all, so
+  no amount of curl-based validation could ever have caught it; only an
+  actual browser could).
 - Surfacing environment blockers (missing tools, a broken Docker daemon,
   pre-existing work) as explicit decisions for the engineer, instead of
   quietly working around or ignoring them, kept the session aligned with
@@ -180,10 +192,16 @@ the data model.
   latency bug would have shipped in a session that stopped at "the try/catch
   is there."
 - When a browser test's behavior contradicts what the server logs show, trust
-  the server log. A password-protection test that looked like a server bug
-  (correct password rejected) turned out, once the server's own request log
-  was checked, to be an app-server responding correctly every time — the gap
-  was in how the test verified success (following a real cross-origin
-  redirect), not in application logic. Reproducing via `curl` first, then
-  instrumenting the actual browser network calls, found the real cause
-  faster than reasoning about the app code in isolation would have.
+  the server log over assumptions about application logic — but don't stop
+  investigating the moment a workaround makes the symptom go away. The
+  password-protection test's server log correctly showed the server
+  responding with the right redirect every time; that much was diagnosed
+  correctly. But the next step — concluding the *test's* cross-origin
+  navigation handling was unreliable, because pointing the test at the app's
+  own origin made it pass — was accepted too early. The actual cause (a CSP
+  `form-action` directive silently blocking the real redirect in every
+  browser, test or otherwise) only came out once a live user hit the
+  identical symptom against a real destination, which is exactly the kind of
+  gap "the test passes now" can hide. A workaround that resolves a symptom is
+  a hypothesis, not a confirmed root cause, until something independent (here,
+  reading the actual CSP response header) confirms the mechanism.

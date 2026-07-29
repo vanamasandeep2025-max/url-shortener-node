@@ -117,6 +117,7 @@ reliability, `PWD` password protection.
 | TC-PWD-008 | Unlock attempts are rate-limited | POST `/:code/unlock` repeatedly with wrong passwords beyond `UNLOCK_RATE_LIMIT_POINTS` | Eventually `429 TOO_MANY_REQUESTS` |
 | TC-PWD-009 | Unprotected link is never gated | GET `/:code` for a link created without a `password` | `302` directly, no prompt |
 | TC-PWD-010 | Dashboard shows a lock indicator | Create a password-protected link via `/ui` | Table row shows a 🔒 indicator next to the code |
+| TC-PWD-011 | Unlock actually navigates through, in a real browser, to a cross-origin destination | In a real browser (**not** curl — curl doesn't enforce CSP), create a password-protected link pointing at an external domain, then submit the correct password on the rendered prompt page | Browser navigates to the external destination; no `Content-Security-Policy` violation in the console. Regression guard for bug #6 (`form-action` blocking the redirect) — see [ai-usage-log.md](ai-usage-log.md). |
 
 ### Reliability
 
@@ -186,6 +187,7 @@ reliability, `PWD` password protection.
 | TC-PWD-008 | "rate limits repeated wrong-password attempts against a single link" | Integration | `api.test.ts` |
 | TC-PWD-009 | "does not gate a link with no password" / "a link created without a password is never gated" | Integration + E2E | `api.test.ts`, `password-protection.spec.ts` |
 | TC-PWD-010 | "dashboard shows a lock indicator for password-protected links" | E2E | `password-protection.spec.ts` |
+| TC-PWD-011 | "password-protected link: prompt -> wrong password -> correct password -> remembered via cookie" (uses a genuinely cross-origin, `page.route()`-stubbed destination specifically to catch this) | E2E | `password-protection.spec.ts` |
 
 ### Coverage summary
 
