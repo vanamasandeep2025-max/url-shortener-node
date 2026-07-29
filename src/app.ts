@@ -2,6 +2,7 @@ import path from "node:path";
 import express, { Express } from "express";
 import helmet from "helmet";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import { env } from "./lib/env";
 import { logger } from "./lib/logger";
@@ -16,6 +17,10 @@ export function createApp(): Express {
   app.use(helmet());
   app.use(cors({ origin: env.corsAllowedOrigins }));
   app.use(express.json({ limit: "10kb" }));
+  // Needed for the password-protected-link unlock form, a plain HTML <form> POST
+  // (works without JavaScript) rather than a fetch() call.
+  app.use(express.urlencoded({ extended: false, limit: "1kb" }));
+  app.use(cookieParser());
   app.use(pinoHttp({ logger, autoLogging: env.NODE_ENV !== "test" }));
 
   app.use("/health", healthRouter);

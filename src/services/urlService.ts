@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { redis } from "../lib/redis";
@@ -11,6 +12,11 @@ import { BadRequestError, ConflictError, GoneError, NotFoundError, ServiceUnavai
 const MAX_GENERATION_ATTEMPTS = 5;
 const CACHE_TTL_SECONDS = 300;
 const CACHE_KEY_PREFIX = "shortUrl:";
+const BCRYPT_SALT_ROUNDS = 10;
+const MIN_PASSWORD_LENGTH = 4;
+// bcrypt silently ignores bytes beyond 72; reject longer input instead of
+// pretending it's part of the password.
+const MAX_PASSWORD_LENGTH = 72;
 
 const PRISMA_UNIQUE_CONSTRAINT_ERROR = "P2002";
 
@@ -22,6 +28,7 @@ export interface CreateShortUrlInput {
   longUrl: string;
   customAlias?: string;
   expiresAt?: string;
+  password?: string;
 }
 
 export interface ShortUrlDTO {
@@ -31,6 +38,7 @@ export interface ShortUrlDTO {
   createdAt: Date;
   expiresAt: Date | null;
   isActive: boolean;
+  hasPassword: boolean;
 }
 
 interface CachedEntry {
@@ -38,6 +46,7 @@ interface CachedEntry {
   longUrl: string;
   isActive: boolean;
   expiresAt: string | null;
+  hasPassword: boolean;
 }
 
 function toShortUrlDTO(record: {
@@ -46,6 +55,7 @@ function toShortUrlDTO(record: {
   createdAt: Date;
   expiresAt: Date | null;
   isActive: boolean;
+  passwordHash: string | null;
 }): ShortUrlDTO {
   return {
     code: record.code,
@@ -54,7 +64,17 @@ function toShortUrlDTO(record: {
     createdAt: record.createdAt,
     expiresAt: record.expiresAt,
     isActive: record.isActive,
+    hasPassword: record.passwordHash !== null,
   };
+}
+
+async function hashPassword(password: string): Promise<string> {
+  if (password.length < MIN_PASSWORD_LENGTH || password.length > MAX_PASSWORD_LENGTH) {
+    throw new BadRequestError(
+      `password must be between ${MIN_PASSWORD_LENGTH} and ${MAX_PASSWORD_LENGTH} characters`,
+    );
+  }
+  return bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 }
 
 function parseExpiresAt(expiresAt: string | undefined): Date | null {
@@ -94,6 +114,7 @@ export async function createShortUrl(input: CreateShortUrlInput): Promise<ShortU
     throw new BadRequestError("url must be a valid http(s) URL of at most 2048 characters");
   }
   const expiresAt = parseExpiresAt(input.expiresAt);
+  const passwordHash = input.password !== undefined ? await hashPassword(input.password) : null;
 
   if (input.customAlias !== undefined) {
     if (!CUSTOM_ALIAS_PATTERN.test(input.customAlias)) {
@@ -101,7 +122,7 @@ export async function createShortUrl(input: CreateShortUrlInput): Promise<ShortU
     }
     try {
       const record = await prisma.shortUrl.create({
-        data: { code: input.customAlias, longUrl: input.longUrl, expiresAt },
+        data: { code: input.customAlias, longUrl: input.longUrl, expiresAt, passwordHash },
       });
       return toShortUrlDTO(record);
     } catch (err) {
@@ -116,7 +137,7 @@ export async function createShortUrl(input: CreateShortUrlInput): Promise<ShortU
     const code = generateCode();
     try {
       const record = await prisma.shortUrl.create({
-        data: { code, longUrl: input.longUrl, expiresAt },
+        data: { code, longUrl: input.longUrl, expiresAt, passwordHash },
       });
       return toShortUrlDTO(record);
     } catch (err) {
@@ -133,6 +154,7 @@ export async function createShortUrl(input: CreateShortUrlInput): Promise<ShortU
 export interface RedirectTarget {
   shortUrlId: number;
   longUrl: string;
+  hasPassword: boolean;
 }
 
 export async function getRedirectTarget(code: string): Promise<RedirectTarget> {
@@ -145,7 +167,7 @@ export async function getRedirectTarget(code: string): Promise<RedirectTarget> {
       if (entry.expiresAt && new Date(entry.expiresAt).getTime() <= Date.now()) {
         throw new GoneError(`short URL '${code}' has expired`);
       }
-      return { shortUrlId: entry.id, longUrl: entry.longUrl };
+      return { shortUrlId: entry.id, longUrl: entry.longUrl, hasPassword: entry.hasPassword };
     }
   } catch (err) {
     if (err instanceof GoneError) throw err;
@@ -156,14 +178,15 @@ export async function getRedirectTarget(code: string): Promise<RedirectTarget> {
   if (!record) {
     throw new NotFoundError(`short URL '${code}' not found`);
   }
+  const hasPassword = record.passwordHash !== null;
   if (!record.isActive) {
-    await cacheEntry(code, { id: record.id, longUrl: record.longUrl, isActive: false, expiresAt: null }, null);
+    await cacheEntry(code, { id: record.id, longUrl: record.longUrl, isActive: false, expiresAt: null, hasPassword }, null);
     throw new GoneError(`short URL '${code}' has been deleted`);
   }
   if (record.expiresAt && record.expiresAt.getTime() <= Date.now()) {
     await cacheEntry(
       code,
-      { id: record.id, longUrl: record.longUrl, isActive: true, expiresAt: record.expiresAt.toISOString() },
+      { id: record.id, longUrl: record.longUrl, isActive: true, expiresAt: record.expiresAt.toISOString(), hasPassword },
       record.expiresAt,
     );
     throw new GoneError(`short URL '${code}' has expired`);
@@ -171,10 +194,28 @@ export async function getRedirectTarget(code: string): Promise<RedirectTarget> {
 
   await cacheEntry(
     code,
-    { id: record.id, longUrl: record.longUrl, isActive: true, expiresAt: record.expiresAt?.toISOString() ?? null },
+    {
+      id: record.id,
+      longUrl: record.longUrl,
+      isActive: true,
+      expiresAt: record.expiresAt?.toISOString() ?? null,
+      hasPassword,
+    },
     record.expiresAt,
   );
-  return { shortUrlId: record.id, longUrl: record.longUrl };
+  return { shortUrlId: record.id, longUrl: record.longUrl, hasPassword };
+}
+
+/**
+ * Verifies a password attempt against a protected link. Deliberately bypasses the
+ * Redis cache and re-reads Postgres directly so the password hash never has to
+ * live in the cache at all.
+ */
+export async function verifyLinkPassword(code: string, password: string): Promise<boolean> {
+  const record = await prisma.shortUrl.findUnique({ where: { code } });
+  if (!record || !record.isActive || !record.passwordHash) return false;
+  if (record.expiresAt && record.expiresAt.getTime() <= Date.now()) return false;
+  return bcrypt.compare(password, record.passwordHash);
 }
 
 export interface ClickMeta {

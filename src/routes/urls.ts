@@ -10,6 +10,7 @@ const createUrlSchema = z.object({
   url: z.string().min(1),
   customAlias: z.string().optional(),
   expiresAt: z.string().optional(),
+  password: z.string().optional(),
 });
 
 const paginationSchema = z.object({
@@ -37,6 +38,7 @@ urlsRouter.post("/", createUrlRateLimiter, validateBody(createUrlSchema), async 
       longUrl: body.url,
       customAlias: body.customAlias,
       expiresAt: body.expiresAt,
+      password: body.password,
     });
     res.status(201).json(dto);
   } catch (err) {
