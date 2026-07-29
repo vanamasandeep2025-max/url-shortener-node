@@ -7,15 +7,49 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-<div class="page">
 
-  <header class="topbar">
-    <div class="mark">🔗</div>
-    <div>
-      <h1>URL Shortener</h1>
-      <p>Link management &amp; click analytics</p>
+<nav class="nav">
+  <div class="nav-inner">
+    <div class="brand">
+      <span class="brand-mark">🔗</span>
+      <span class="brand-name">URL Shortener</span>
     </div>
-  </header>
+    <span class="nav-tag">Shorten · Protect · Track</span>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="hero-inner">
+    <h1>Shorten a link.<br />Protect it. Watch it work.</h1>
+    <p class="hero-sub">Paste a long URL below to get a short, shareable link — with optional password protection, an expiry date, and click analytics built in.</p>
+
+    <form id="create-form" class="shorten-form">
+      <div class="pill">
+        <label class="sr-only" for="url">Destination URL</label>
+        <input id="url" name="url" type="url" placeholder="Paste a long link here" required />
+        <button type="submit" class="btn-shorten">Shorten Now!</button>
+      </div>
+
+      <div class="options-row">
+        <div class="opt">
+          <label for="customAlias">Custom alias</label>
+          <input id="customAlias" name="customAlias" type="text" placeholder="optional" pattern="[A-Za-z0-9_\-]{3,32}" title="3-32 chars: letters, digits, _ or -" />
+        </div>
+        <div class="opt">
+          <label for="expiresAt">Expires at</label>
+          <input id="expiresAt" name="expiresAt" type="datetime-local" />
+        </div>
+        <div class="opt">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" placeholder="optional" minlength="4" maxlength="72" autocomplete="new-password" />
+        </div>
+      </div>
+    </form>
+    <div id="message" class="banner"></div>
+  </div>
+</header>
+
+<main class="page">
 
   <section class="stats-row">
     <div class="stat-card">
@@ -33,32 +67,8 @@
   </section>
 
   <section class="card">
-    <h2>Create a short link</h2>
-    <form id="create-form" class="create">
-      <div class="field grow">
-        <label for="url">Destination URL</label>
-        <input id="url" name="url" type="url" placeholder="https://example.com/very/long/path" required />
-      </div>
-      <div class="field fixed-alias">
-        <label for="customAlias">Custom alias</label>
-        <input id="customAlias" name="customAlias" type="text" placeholder="optional" pattern="[A-Za-z0-9_\-]{3,32}" title="3-32 chars: letters, digits, _ or -" />
-      </div>
-      <div class="field fixed-date">
-        <label for="expiresAt">Expires at</label>
-        <input id="expiresAt" name="expiresAt" type="datetime-local" />
-      </div>
-      <div class="field fixed-alias">
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" placeholder="optional" minlength="4" maxlength="72" autocomplete="new-password" />
-      </div>
-      <button type="submit" class="btn">Shorten</button>
-    </form>
-    <div id="message" class="banner"></div>
-  </section>
-
-  <section class="card">
     <div class="card-header">
-      <h2>Links</h2>
+      <h2>Your links</h2>
       <label class="toggle"><input type="checkbox" id="toggle-inactive" /> Show deleted</label>
     </div>
     <div class="table-scroll">
@@ -78,12 +88,12 @@
     </div>
     <div id="empty" class="empty-state" hidden>
       <span class="glyph">🔗</span>
-      No links yet — create one above to get started.
+      No links yet — shorten one above to get started.
     </div>
     <div id="loading" class="skeleton">Loading…</div>
   </section>
 
-</div>
+</main>
 <script src="app.js" defer></script>
 </body>
 </html>
