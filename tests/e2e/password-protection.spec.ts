@@ -1,27 +1,34 @@
 import { test, expect } from "@playwright/test";
-import { clearAllLinks } from "./helpers";
+import { clearAllLinks, uniqueUrl } from "./helpers";
 
 test.beforeEach(async ({ page, request }) => {
   await clearAllLinks(request);
   await page.goto("/ui/");
 });
 
-// Destinations point back at this app's own origin (a distinctive query string on
-// /ui/) rather than an external domain. An earlier version of this test pointed at
-// https://example.com and stubbed it via page.route(), which turned out to be an
-// unreliable way to assert "the browser followed the redirect" -- redirect-driven
-// cross-origin navigations weren't reliably intercepted in this environment, causing
-// the test to hang waiting on a real network round-trip. Asserting against our own
-// server removes that dependency entirely and is a more robust test either way.
 function destinationFor(baseURL: string | undefined, label: string): string {
   return `${baseURL}/ui/?e2e=${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 test("password-protected link: prompt -> wrong password -> correct password -> remembered via cookie", async ({
   page,
-  baseURL,
 }) => {
-  const destination = destinationFor(baseURL, "locked");
+  // Cross-origin destination is the point of this test, not incidental: an earlier
+  // version of this suite used a same-origin destination here after wrongly diagnosing
+  // a failure as "unreliable page.route interception for cross-origin redirects." The
+  // real cause was Helmet's default CSP `form-action 'self'`, which blocks a *form
+  // submission's resulting redirect* from crossing origins -- the server was always
+  // responding correctly (302 + Location + Set-Cookie, confirmed via its own request
+  // log), but the browser silently refused to follow the redirect, so nothing visibly
+  // happened. Fixed in src/app.ts by widening `form-action` to allow http(s) (this
+  // app's whole product is redirecting to arbitrary http(s) URLs -- see
+  // engineering-summary.md's "Open redirect by design" note). This test exists
+  // specifically to catch a regression of that CSP restriction; a same-origin
+  // destination would never have caught it in the first place.
+  const destination = uniqueUrl("locked");
+  await page.route("https://example.com/**", (route) =>
+    route.fulfill({ status: 200, contentType: "text/plain", body: "destination reached" }),
+  );
 
   await page.getByLabel("Destination URL").fill(destination);
   await page.getByLabel("Password").fill("correct-horse");
@@ -41,7 +48,7 @@ test("password-protected link: prompt -> wrong password -> correct password -> r
   await expect(page.locator(".error")).toContainText("Incorrect password");
   await expect(page).not.toHaveURL(destination);
 
-  // Correct password navigates through to the real destination.
+  // Correct password navigates through to the real (stubbed) cross-origin destination.
   await page.locator('input[name="password"]').fill("correct-horse");
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page).toHaveURL(destination);

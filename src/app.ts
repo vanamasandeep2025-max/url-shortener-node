@@ -14,7 +14,24 @@ import { notFoundHandler, errorHandler } from "./middleware/errorHandler";
 export function createApp(): Express {
   const app = express();
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+          // Helmet's default `form-action 'self'` blocks not just where a <form> can
+          // POST to, but also any cross-origin redirect a server sends in response to
+          // that POST -- which silently breaks the password-unlock form's whole job
+          // (redirecting to the link's arbitrary http(s) destination) whenever that
+          // destination isn't this app's own origin. This app's entire product is an
+          // intentional open redirect to arbitrary http(s) URLs (see
+          // engineering-summary.md's "Open redirect by design" note), so restricting
+          // form-action to 'self' was never actually the intended security boundary.
+          "form-action": ["'self'", "https:", "http:"],
+        },
+      },
+    }),
+  );
   app.use(cors({ origin: env.corsAllowedOrigins }));
   app.use(express.json({ limit: "10kb" }));
   // Needed for the password-protected-link unlock form, a plain HTML <form> POST
